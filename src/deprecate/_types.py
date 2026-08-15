@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Protocol, Union, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, Optional, Protocol, TypeVar, Union, runtime_checkable
 
 if TYPE_CHECKING:
     from typing_extensions import TypeGuard
@@ -472,6 +472,84 @@ def _has_deprecation_meta(obj: Any) -> "TypeGuard[_HasDeprecationMeta]":  # noqa
 
     """
     return isinstance(getattr(obj, "__deprecated__", None), DeprecationConfig)
+
+
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+@runtime_checkable
+class Deprecated(Protocol, Generic[_T_co]):
+    """Public type produced by :func:`~deprecate.proxy.deprecated_class` / :func:`~deprecate.proxy.deprecated_instance`.
+
+    Documents the public contract that deprecated proxies satisfy:
+
+    - ``__wrapped__`` points back to the source object/class for static-analysis tools (Sphinx, mypy, IDEs).
+    - ``__deprecated__`` carries :class:`DeprecationConfig` metadata consumed by audit tools.
+    - Attribute, item, and call access is transparently forwarded to the wrapped source.
+
+    The type parameter ``T`` describes the instance type returned by calling the proxy (i.e. the target
+    type for class-forwarding proxies). It is purely a static affordance: runtime instances of
+    :class:`~deprecate.proxy._DeprecatedProxy` satisfy this Protocol structurally, so no explicit ``isinstance``
+    check is required.
+
+    !!! note "Static-typing scope"
+        Generic inference (``Deprecated[NewCls]`` instead of ``Deprecated[Any]``) is available for the
+        **functional/assignment form** — ``OldCls = deprecated_class(target=NewCls, ...)(OldClsDef)`` — where
+        mypy infers ``T`` from the ``target`` argument. The decorator form ``@deprecated_class(target=NewCls, ...)``
+        is typed as the raw source class because mypy does not rebind a class definition to an instance return
+        type; full inference there would require returning a real class instead of a proxy.
+
+    !!! warning "``isinstance`` only"
+        This is a *data* Protocol (it declares attributes, not just methods), so only ``isinstance`` is
+        supported at runtime. ``issubclass(SomeType, Deprecated)`` raises :class:`TypeError`, as it does
+        for every ``@runtime_checkable`` Protocol with non-method members.
+
+    Example:
+        >>> from deprecate import deprecated_class, Deprecated
+        >>> class NewColor:
+        ...     def __init__(self, code: int) -> None:
+        ...         self.code = code
+        >>> @deprecated_class(target=NewColor, deprecated_in="1.0", remove_in="2.0", stream=None)
+        ... class OldColor:
+        ...     pass
+        >>> isinstance(OldColor, Deprecated)
+        True
+        >>> OldColor.__wrapped__ is OldColor.__wrapped__  # breadcrumb back to the source class
+        True
+
+        The functional/assignment form is what gives mypy the target type — it infers
+        ``Deprecated[NewColor]`` here, so ``OldColorAlias(1)`` is typed as ``NewColor``:
+
+        >>> _decorator = deprecated_class(target=NewColor, deprecated_in="1.0", remove_in="2.0", stream=None)
+        >>> class _OldColorSource:
+        ...     pass
+        >>> OldColorAlias = _decorator(_OldColorSource)
+        >>> isinstance(OldColorAlias(1), NewColor)
+        True
+
+    """
+
+    __wrapped__: Any
+    __deprecated__: DeprecationConfig
+    __signature__: Any
+
+    def __call__(self, *args: Any, **kwargs: Any) -> _T_co:  # noqa: ANN401
+        """Forward a call to the wrapped source (e.g. ``OldColor(1)`` -> ``NewColor(1)``)."""
+        raise NotImplementedError
+
+    def __getattr__(self, name: str) -> Any:  # noqa: ANN401
+        """Forward attribute access (e.g. ``OldColor.RED`` -> ``NewColor.RED``)."""
+        raise NotImplementedError
+
+    def __getitem__(self, key: Any) -> Any:  # noqa: ANN401
+        """Forward item access (e.g. ``proxy['key']`` -> ``source['key']``)."""
+        raise NotImplementedError
+
+
+#: Alias for use with :func:`~deprecate.proxy.deprecated_class`; clearer at type-annotation sites.
+DeprecatedClass = Deprecated
+#: Alias for use with :func:`~deprecate.proxy.deprecated_instance`; clearer at type-annotation sites.
+DeprecatedInstance = Deprecated
 
 
 @dataclass

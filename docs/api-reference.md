@@ -30,6 +30,8 @@ Auto-generated from source docstrings. For usage examples see the [User Guide](g
 
 ::: deprecate.TargetMode
 
+::: deprecate.Deprecated
+
 ## Utilities
 
 ::: deprecate.utils.void
